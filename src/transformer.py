@@ -215,12 +215,10 @@ class MultiHeadAttention(nn.Module):
             Q = self.pos_encoder(Q, token_positions)
             K = self.pos_encoder(K, token_positions)
 
-        # mask
         mask = torch.triu(
             torch.ones(seq_len, seq_len, device=X.device, dtype=torch.bool), diagonal=1
         )
 
-        # multihead attention
         heads: Float[Tensor, "batch_size num_heads seq_len d_v"] = (
             scaled_dot_product_attention(Q=Q, V=V, K=K, mask=mask)
         )
@@ -249,8 +247,8 @@ class TransformerBlock(nn.Module):
         x: Float[Tensor, "batch_size seq_len d_model"],
         token_positions: Int[Tensor, "batch_size seq_len"] | None = None,
     ) -> Float[Tensor, "batch_size seq_len d_model"]:
-        x += self.mha(self.norm1(x), token_positions)
-        x += self.feed_forward(self.norm2(x))
+        x: Float[Tensor, "batch_size seq_len d_model"] = x + self.mha(self.norm1(x), token_positions)
+        x: Float[Tensor, "batch_size seq_len d_model"] = x + self.feed_forward(self.norm2(x))
         return x
 
 
