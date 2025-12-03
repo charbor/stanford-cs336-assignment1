@@ -9,7 +9,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from src.transformer import Embedding, RMSNorm, RoPE, SwiGLU, scaled_dot_product_attention, softmax, MultiHeadAttention
+from src.transformer import Embedding, RMSNorm, RoPE, SwiGLU, TransformerBlock, scaled_dot_product_attention, softmax, MultiHeadAttention
 
 
 def run_linear(
@@ -30,7 +30,7 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-    from model import Linear
+    from src.transformer import Linear
     linear = Linear(dim_in=d_in, dim_out=d_out)
     linear.weights.data = weights
     return linear(in_features)
@@ -54,7 +54,7 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    from model import Embedding
+    from src.transformer import Embedding
     embedding = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
     embedding.weights.data = weights
     return embedding(token_ids)
@@ -288,7 +288,28 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+        # Create RoPE and block
+    rope = RoPE(theta=theta, d_k=d_model // num_heads, max_seq_len=max_seq_len, device=in_features.device)
+    block = TransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff, pos_encoder=rope)
+    
+    # Load attention weights (K, Q, V order to match your split)
+    block.mha.W_KQV.weights.data = torch.cat([
+        weights['attn.k_proj.weight'],
+        weights['attn.q_proj.weight'], 
+        weights['attn.v_proj.weight']
+    ], dim=0)
+    block.mha.W_O.weights.data = weights['attn.output_proj.weight']
+    
+    # Load FFN weights (transpose because weights are stored transposed)
+    block.feed_forward.W1.data = weights['ffn.w1.weight']
+    block.feed_forward.W2.data = weights['ffn.w2.weight']
+    block.feed_forward.W3.data = weights['ffn.w3.weight']
+    
+    # Load norm weights
+    block.norm1.gain.data = weights['ln1.weight']
+    block.norm2.gain.data = weights['ln2.weight']
+    
+    return block(in_features)
 
 
 def run_transformer_lm(
@@ -370,7 +391,46 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from src.transformer import Transformer
+    model = Transformer(
+        vocab_size=vocab_size,
+        seq_len=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+    # Load token embeddings
+    model.embedder.weights.data = weights['token_embeddings.weight']
+    
+    # Load weights for each transformer layer
+    for i in range(num_layers):
+        layer = model.transformer_blocks[i]
+        
+        # Load attention weights (K, Q, V order to match your split)
+        layer.mha.W_KQV.weights.data = torch.cat([
+            weights[f'layers.{i}.attn.k_proj.weight'],
+            weights[f'layers.{i}.attn.q_proj.weight'],
+            weights[f'layers.{i}.attn.v_proj.weight']
+        ], dim=0)
+        layer.mha.W_O.weights.data = weights[f'layers.{i}.attn.output_proj.weight']
+        
+        # Load FFN weights (transpose to match your initialization)
+        layer.feed_forward.W1.data = weights[f'layers.{i}.ffn.w1.weight']
+        layer.feed_forward.W2.data = weights[f'layers.{i}.ffn.w2.weight']
+        layer.feed_forward.W3.data = weights[f'layers.{i}.ffn.w3.weight']
+        
+        # Load norm weights
+        layer.norm1.gain.data = weights[f'layers.{i}.ln1.weight']
+        layer.norm2.gain.data = weights[f'layers.{i}.ln2.weight']
+    
+    # Load final norm and LM head weights
+    model.norm.gain.data = weights['ln_final.weight']
+    model.linear.weights.data = weights['lm_head.weight']
+    
+    # Run forward pass
+    return model(in_indices)
 
 
 def run_rmsnorm(
