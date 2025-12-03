@@ -1,5 +1,5 @@
 from math import sqrt
-from jaxtyping import Int
+from jaxtyping import Complex, Int
 from torch import Tensor, nn
 from einops import einsum, rearrange
 import torch
@@ -23,7 +23,7 @@ class Linear(nn.Module):
             self.weights, mean=0, std=std, a=-3 * std, b=3 * std
         )
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
+    def forward(self, X: Float[Tensor, " ... dim_in"]) -> Float[Tensor, " ... dim_out"]:
         return einsum(X, self.weights, "... dim_in, dim_out dim_in -> ... dim_out")
 
 
@@ -43,7 +43,7 @@ class Embedding(nn.Module):
         )  # [num_embeddings, embedding_dim]
         torch.nn.init.trunc_normal_(self.weights, mean=0, std=1, a=-3, b=3)
 
-    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, token_ids: Int[Tensor, " ..."]) -> Float[Tensor, " ... embedding_dim"]:
         return self.weights[token_ids]
 
 
@@ -87,7 +87,7 @@ class SwiGLU(nn.Module):
             std = sqrt(2 / (W.shape[1] + W.shape[0]))
             torch.nn.init.trunc_normal_(W, mean=0, std=std, a=-3 * std, b=3 * std)
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
+    def forward(self, X: Float[Tensor, " ... dim_in"]) -> Float[Tensor, " ... dim_out"]:
         Y1 = X @ self.W1.T
         gate = Y1 * torch.sigmoid(Y1)
         Y3 = X @ self.W3.T
@@ -103,9 +103,9 @@ class RoPE(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,  # (..., seq_len, d_k)
-        token_positions: torch.Tensor,  # (..., seq_len)
-    ) -> torch.Tensor:
+        x: Float[Tensor, " ... seq_len d_k"], 
+        token_positions: Int[Tensor, " ... seq_len"], 
+    ) -> Float[Tensor, " ... seq_len d_k"]:
         """
         Cast into complex numbers, rotate, and cast back to real numbers
         """
@@ -117,22 +117,22 @@ class RoPE(nn.Module):
         )
 
         # cast x to complex numbers: [a, b, c, d, ...] -> [a + bi, c + di, ...]
-        real_x = x[..., ::2]
-        imag_x = x[..., 1::2]
-        z = torch.complex(real_x, imag_x)  # [..., seq_len, d_k / 2]
-
+        real_x: Float[Tensor, " ... seq_len half_d_k"] = x[..., ::2]
+        imag_x: Float[Tensor, " ... seq_len half_d_k"] = x[..., 1::2]
+        z: Complex[Tensor, " ... seq_len half_d_k"] = torch.complex(real_x, imag_x)
+    
         # rotational embedding of x
         z *= torch.exp(1j * freqs)  # same shape
 
         # complex to real: [a + bi, c + di, ...] -> [a, b, c, d, ...]
-        x_rotated = torch.stack([z.real, z.imag], dim=-1).flatten(
+        x_rotated: Float[Tensor, " ... seq_len d_k"] = torch.stack([z.real, z.imag], dim=-1).flatten(
             start_dim=-2
         )  # [..., seq_len, d_k]
 
         return x_rotated
 
 
-def softmax(x: torch.Tensor, dim: int) -> torch.Tensor:
+def softmax(x: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
     """result[i] = exp(x_i) / sum(exp(x_i))"""
     x_shifted = x - torch.max(x, dim=dim, keepdim=True).values
     x_exp = torch.exp(x_shifted)
