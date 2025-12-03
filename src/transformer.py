@@ -78,7 +78,6 @@ class SwiGLU(nn.Module):
 
     def __init__(self, dim_in: int, d_model: int, d_ff: int):
         super().__init__()
-        # d_ff = np.round(8/3 * d_model, 64) # TODO: round to closets multiple of 64
         self.W1 = nn.Parameter(data=torch.empty(d_ff, d_model))
         self.W2 = nn.Parameter(data=torch.empty(d_model, d_ff))
         self.W3 = nn.Parameter(data=torch.empty(d_ff, d_model))
