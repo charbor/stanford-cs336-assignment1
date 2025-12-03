@@ -18,7 +18,7 @@ class Linear(nn.Module):
         super().__init__()
         std = sqrt(2 / (dim_in + dim_out))
         data = torch.empty(dim_out, dim_in, device=device, dtype=dtype)
-        self.weights = nn.Parameter(data=data, requires_grad=True)
+        self.weights: Float[Tensor, " dim_out dim_in"] = nn.Parameter(data=data, requires_grad=True)
         torch.nn.init.trunc_normal_(
             self.weights, mean=0, std=std, a=-3 * std, b=3 * std
         )
@@ -38,13 +38,13 @@ class Embedding(nn.Module):
     ):
         super().__init__()
         data = torch.empty(num_embeddings, embedding_dim, device=device, dtype=dtype)
-        self.weights = nn.Parameter(
+        self.weights: Float[Tensor, " num_embeddings embedding_dim"] = nn.Parameter(
             data=data, requires_grad=True
-        )  # [num_embeddings, embedding_dim]
+        )
         torch.nn.init.trunc_normal_(self.weights, mean=0, std=1, a=-3, b=3)
 
     def forward(self, token_ids: Int[Tensor, " ..."]) -> Float[Tensor, " ... embedding_dim"]:
-        return self.weights[token_ids]
+        return self.weights(token_ids)
 
 
 class RMSNorm(nn.Module):
@@ -57,7 +57,7 @@ class RMSNorm(nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        self.gain = torch.nn.Parameter(
+        self.gain: Float[Tensor, " d_model"] = torch.nn.Parameter(
             data=torch.ones(d_model, device=device, dtype=dtype), requires_grad=True
         )
         self.eps = eps
@@ -70,7 +70,7 @@ class RMSNorm(nn.Module):
         rms: Float[torch.Tensor, "... 1"] = torch.sqrt(
             X.pow(2).mean(dim=-1, keepdim=True) + self.eps
         )
-        result = X / rms * self.gain
+        result: Float[Tensor, " ... d_model"] = X / rms * self.gain
         return result.to(in_dtype)
 
 
@@ -86,11 +86,12 @@ class SwiGLU(nn.Module):
             std = sqrt(2 / (W.shape[1] + W.shape[0]))
             torch.nn.init.trunc_normal_(W, mean=0, std=std, a=-3 * std, b=3 * std)
 
-    def forward(self, X: Float[Tensor, " ... dim_in"]) -> Float[Tensor, " ... dim_out"]:
-        Y1 = X @ self.W1.T
-        gate = Y1 * torch.sigmoid(Y1)
-        Y3 = X @ self.W3.T
-        return (gate * Y3) @ self.W2.T
+    def forward(self, X: Float[Tensor, " ... dim_in"]) -> Float[Tensor, " ... d_model"]:
+        Y1: Float[Tensor, " ... d_ff"] = X @ self.W1.T
+        gate: Float[Tensor, " ... d_ff"] = Y1 * torch.sigmoid(Y1)
+        Y3: Float[Tensor, " ... d_ff"] = X @ self.W3.T
+        result: Float[Tensor, " ... d_model"] = (gate * Y3) @ self.W2.T
+        return result
 
 
 class RoPE(nn.Module):
